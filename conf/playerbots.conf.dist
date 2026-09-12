@@ -594,7 +594,8 @@ AiPlayerbot.AutoGearCommandAltBots = 1
 # whose item-level floor matches AutoGearScoreLimit (e.g. 290 = ICC, 245 = ToC,
 # 125 = Kara, 78 = MC). See the AutoGearScoreLimit comment below for the full list.
 # chat command: autogear bis x, (x must be positive integer) will give items based on value of x.
-# If x is bigger than AutoGearScoreLimit, bis wont be given, if lower it will match x when giving items.
+# If AutoGearScoreLimit is non-zero and x is bigger than it, bis wont be given.
+# AutoGearScoreLimit = 0 leaves explicit `autogear bis x` requests unlimited.
 # Commands falls back to autogear when no tier matches or the table is empty for the bot's class/spec.
 # Requires AutoGearQualityLimit = 4 and AutoGearCommand = 1.
 # If AutoGearCommandAltBots = 1 it will be anbled for alt bots.

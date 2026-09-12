@@ -357,7 +357,10 @@ bool BisGearAction::Execute(Event event)
                 "Invalid BiS ilvl argument '%param'. Use a positive integer.", phs));
             return false;
         }
-        if (parsed > static_cast<unsigned long>(sPlayerbotAIConfig.autoGearScoreLimit))
+        // A zero limit means "unlimited" for an explicit `autogear bis <ilvl>`
+        // request. Keep non-zero limits as the administrative safety ceiling.
+        if (sPlayerbotAIConfig.autoGearScoreLimit > 0 &&
+            parsed > static_cast<unsigned long>(sPlayerbotAIConfig.autoGearScoreLimit))
         {
             std::map<std::string, std::string> phs;
             phs["%requested"] = std::to_string(parsed);
