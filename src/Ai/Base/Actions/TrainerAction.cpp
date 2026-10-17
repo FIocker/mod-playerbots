@@ -9,6 +9,7 @@
 #include "BisListMgr.h"
 #include "BudgetValues.h"
 #include "Event.h"
+#include "ItemPackets.h"
 #include "PlayerbotFactory.h"
 #include "PlayerbotTextMgr.h"
 #include "Playerbots.h"
@@ -287,12 +288,10 @@ bool BisGearAction::RunAutogearFallback(uint16 effectiveIlvl)
         "bis_no_rows_fallback",
         "No BiS for your tier/spec/level, check cfg, running autogear instead", {}));
 
-    // Wipe all equipped slots so autogear gears from scratch at the requested ilvl
-    // (avoids old high-tier items surviving the incremental 1.2x threshold).
-    PlayerbotFactory::DestroyEquippedGear(bot);
-
-    PlayerbotFactory::AutoGear(bot, sPlayerbotAIConfig.autoGearQualityLimit, effectiveIlvl, /*incremental*/ false,
-                               sPlayerbotAIConfig.twoRoundsGearInit);
+    // A BiS request should not downgrade an existing loadout when the table has no
+    // matching row. Use the normal incremental gear path with an item-level floor.
+    PlayerbotFactory::AutoGear(bot, sPlayerbotAIConfig.autoGearQualityLimit, effectiveIlvl, /*incremental*/ true,
+                               /*secondChance*/ false, /*applyFinishers*/ true, /*preserveHigherIlvl*/ true);
     return true;
 }
 
@@ -411,54 +410,38 @@ bool BisGearAction::Execute(Event event)
     botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault(
         "bis_applying_msg", "Applying BiS gear", {}));
 
-    // 1. Wipe everything currently equipped so autogear starts from a clean slate.
-    //    Old items linger in inventory otherwise and autogear leaves slots empty on bag conflicts.
-    PlayerbotFactory::DestroyEquippedGear(bot);
-
-    // Wipe equippable items from bags too. Autogear can shove old equipped items into bags
-    // (HandleAutoStoreBagItemOpcode), and a unique-equipped duplicate stuck in a bag blocks
-    // CanEquipNewItem on subsequent BiS runs. Spare consumables/reagents.
-    auto destroyIfEquippable = [&](uint8 bag, uint8 slot)
+    // Apply BiS as an upgrade-only operation. Existing gear at the same or higher
+    // item level stays equipped, and displaced lower-level gear is moved to bags.
+    auto moveEquippedToBag = [&](Item* item) -> bool
     {
-        Item* item = bot->GetItemByPos(bag, slot);
         if (!item)
-            return;
-        ItemTemplate const* tmpl = item->GetTemplate();
-        if (!tmpl)
-            return;
-        if (tmpl->Class == ITEM_CLASS_WEAPON || tmpl->Class == ITEM_CLASS_ARMOR)
-            bot->DestroyItem(bag, slot, true);
+            return true;
+
+        uint8 bag = item->GetBagSlot();
+        uint8 slot = item->GetSlot();
+        WorldPacket packet(CMSG_AUTOSTORE_BAG_ITEM, 3);
+        packet << bag << slot << uint8(NULL_BAG);
+        WorldPackets::Item::AutoStoreBagItem autoStore(std::move(packet));
+        autoStore.Read();
+        bot->GetSession()->HandleAutoStoreBagItemOpcode(autoStore);
+        return bot->GetItemByPos(bag, slot) != item;
     };
-    for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
-        destroyIfEquippable(INVENTORY_SLOT_BAG_0, slot);
-    for (uint8 bag = INVENTORY_SLOT_BAG_START; bag < INVENTORY_SLOT_BAG_END; ++bag)
+
+    auto restoreEquippedItem = [&](Item* item, uint8 slot)
     {
-        if (Bag* container = bot->GetBagByPos(bag))
-            for (uint32 slot = 0; slot < container->GetBagSize(); ++slot)
-                destroyIfEquippable(bag, slot);
-    }
+        if (!item || bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot) == item)
+            return;
 
-    // 2. Run full autogear on the empty bot so every slot gets a best-available pick.
-    //    Uncovered slots will keep the autogear pick; BiS overwrites the rest below.
-    if (sPlayerbotAIConfig.autoGearCommand)
-        PlayerbotFactory::AutoGear(bot, sPlayerbotAIConfig.autoGearQualityLimit, ilvl, /*incremental*/ false,
-                                   sPlayerbotAIConfig.twoRoundsGearInit, /*applyFinishers*/ false);
+        uint16 dest = 0;
+        if (bot->CanEquipItem(slot, dest, item, false) == EQUIP_ERR_OK)
+            bot->EquipItem(dest, item, true);
+    };
 
-    // Autogear may have placed the exact item BiS wants into trinket2/finger2 (or vice versa);
-    // unique-equipped enforcement would then make BiS's equip silently drop one copy.
-    std::set<uint32> bisEntries;
-    for (auto const& kv : bisMap)
-        bisEntries.insert(kv.second);
-    for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
-    {
-        if (Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
-            if (bisEntries.count(item->GetEntry()))
-                bot->DestroyItem(INVENTORY_SLOT_BAG_0, slot, true);
-    }
+    uint32 preservedItems = 0;
 
-    // 3. Apply BiS: only touch slots where the bot can actually equip the BiS item.
-    //    If item requires reputation, grant the required rank first. If CanUseItem still
-    //    fails (class/race/skill/level), keep autogear's pick for that slot.
+    // Only touch slots where the bot can actually equip the BiS item. If the item
+    // requires reputation, grant the required rank first. If it is not usable or
+    // conflicts with another equipped item, leave the existing loadout untouched.
     for (auto const& kv : bisMap)
     {
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(kv.second);
@@ -484,35 +467,63 @@ bool BisGearAction::Execute(Event event)
             continue;
 
         uint8 slot = kv.first;
-        if (bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
-            bot->DestroyItem(INVENTORY_SLOT_BAG_0, slot, true);
+        Item* current = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+        if (current)
+        {
+            ItemTemplate const* currentProto = current->GetTemplate();
+            if (currentProto && currentProto->ItemLevel >= proto->ItemLevel)
+            {
+                ++preservedItems;
+                continue;
+            }
+        }
+
+        // A two-handed/staff/polearm main-hand would force the off-hand out. Do
+        // not do that when the off-hand is at least as high-level as the upgrade.
+        if (slot == EQUIPMENT_SLOT_MAINHAND)
+        {
+            bool removesOffhand = proto->InventoryType == INVTYPE_2HWEAPON ||
+                                   proto->SubClass == ITEM_SUBCLASS_WEAPON_POLEARM ||
+                                   proto->SubClass == ITEM_SUBCLASS_WEAPON_STAFF ||
+                                   proto->SubClass == ITEM_SUBCLASS_WEAPON_FISHING_POLE;
+            if (removesOffhand)
+            {
+                if (Item* offhand = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND))
+                    if (ItemTemplate const* offhandProto = offhand->GetTemplate();
+                        offhandProto && offhandProto->ItemLevel >= proto->ItemLevel)
+                    {
+                        ++preservedItems;
+                        continue;
+                    }
+            }
+        }
+
+        // Probe with swap semantics while the old item is still present. This
+        // catches class/weapon/unique restrictions before moving anything.
+        uint16 probeDest = 0;
+        if (bot->CanEquipNewItem(slot, probeDest, kv.second, true) != EQUIP_ERR_OK)
+            continue;
+
+        Item* displaced = current;
+        if (displaced && !moveEquippedToBag(displaced))
+            continue;
 
         uint16 dest = 0;
         InventoryResult eqResult = bot->CanEquipNewItem(slot, dest, kv.second, false);
 
-        // Paired slots (finger 10<->11, trinket 12<->13): destroy paired slot and retry once
-        // when unique-equipped or autogear residue blocks the first attempt.
         if (eqResult != EQUIP_ERR_OK)
         {
-            uint8 pairedSlot = 0xFF;
-            if (slot == EQUIPMENT_SLOT_FINGER1)        pairedSlot = EQUIPMENT_SLOT_FINGER2;
-            else if (slot == EQUIPMENT_SLOT_FINGER2)   pairedSlot = EQUIPMENT_SLOT_FINGER1;
-            else if (slot == EQUIPMENT_SLOT_TRINKET1)  pairedSlot = EQUIPMENT_SLOT_TRINKET2;
-            else if (slot == EQUIPMENT_SLOT_TRINKET2)  pairedSlot = EQUIPMENT_SLOT_TRINKET1;
-
-            if (pairedSlot != 0xFF)
-            {
-                if (bot->GetItemByPos(INVENTORY_SLOT_BAG_0, pairedSlot))
-                    bot->DestroyItem(INVENTORY_SLOT_BAG_0, pairedSlot, true);
-                eqResult = bot->CanEquipNewItem(slot, dest, kv.second, false);
-            }
+            restoreEquippedItem(displaced, slot);
+            continue;
         }
 
-        if (eqResult == EQUIP_ERR_OK)
+        if (!bot->EquipNewItem(dest, kv.second, true))
         {
-            bot->EquipNewItem(dest, kv.second, true);
-            bot->AutoUnequipOffhandIfNeed();
+            restoreEquippedItem(displaced, slot);
+            continue;
         }
+
+        bot->AutoUnequipOffhandIfNeed();
     }
 
     PlayerbotFactory factory(bot, bot->GetLevel(), ITEM_QUALITY_EPIC, 0);
@@ -523,7 +534,8 @@ bool BisGearAction::Execute(Event event)
     bot->DurabilityRepairAll(false, 1.0f, false);
 
     botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-        "bis_applied_msg", "BiS applied", {}));
+        "bis_applied_msg", "BiS applied; preserved %preserved higher/equal item-level items",
+        {{"%preserved", std::to_string(preservedItems)}}));
     return true;
 }
 

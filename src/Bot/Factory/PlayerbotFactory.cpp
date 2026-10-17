@@ -2103,7 +2103,7 @@ void Shuffle(std::vector<uint32>& items)
 //     }
 // }
 
-void PlayerbotFactory::InitEquipment(bool incremental, bool second_chance)
+void PlayerbotFactory::InitEquipment(bool incremental, bool second_chance, bool preserve_higher_ilvl)
 {
     if (level < 5)
     {
@@ -2333,6 +2333,12 @@ void PlayerbotFactory::InitEquipment(bool incremental, bool second_chance)
                 // delay heavy check to here
                 if (!CanEquipItem(proto))
                     continue;
+                if (incremental && preserve_higher_ilvl && oldItem)
+                {
+                    ItemTemplate const* oldProto = oldItem->GetTemplate();
+                    if (oldProto && proto->ItemLevel <= oldProto->ItemLevel)
+                        continue;
+                }
                 uint16 dest;
                 if (!CanEquipUnseenItem(slot, dest, newItemId))
                     continue;
@@ -3691,11 +3697,11 @@ void PlayerbotFactory::DestroyEquippedGear(Player* bot)
 }
 
 void PlayerbotFactory::AutoGear(Player* bot, uint32 itemQuality, uint32 ilvl, bool incremental, bool secondChance,
-                                bool applyFinishers)
+                                bool applyFinishers, bool preserveHigherIlvl)
 {
     uint32 gs = ilvl == 0 ? 0 : CalcMixedGearScore(ilvl, itemQuality);
     PlayerbotFactory factory(bot, bot->GetLevel(), itemQuality, gs);
-    factory.InitEquipment(incremental, secondChance);
+    factory.InitEquipment(incremental, secondChance, preserveHigherIlvl);
 
     if (!applyFinishers)
         return;
