@@ -34,7 +34,7 @@ bool TrainerAction::Execute(Event event)
     uint32 spellId = chat->parseSpell(param);
 
     bool learnSpells = param.find("learn") != std::string::npos || sRandomPlayerbotMgr.IsRandomBot(bot) ||
-                       (sPlayerbotAIConfig.allowLearnTrainerSpells &&
+                       (sPlayerbotAIConfig.AllowLearnTrainerSpells &&
                         // TODO: Rewrite to only exclude start primary profession skills and make config dependent.
                         (trainer->GetTrainerType() != Trainer::Type::Tradeskill || !IsRealPlayer(botAI->GetMaster())));
 
@@ -68,10 +68,20 @@ bool TrainerAction::isPossible()
     if (!trainer->IsTrainerValidForPlayer(bot))
         return false;
 
-    if (trainer->GetSpells().empty())
-        return false;
+    for (Trainer::Spell const& spell : trainer->GetSpells())
+    {
+        Trainer::Spell const* trainerSpell = trainer->GetSpell(spell.SpellId);
+        if (!trainerSpell)
+            continue;
 
-    return true;
+        if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer, trainerSpell))
+            continue;
+
+        if (trainer->CanTeachSpell(bot, trainerSpell))
+            return true;
+    }
+
+    return false;
 }
 
 Unit* TrainerAction::GetTarget()
@@ -108,6 +118,9 @@ void TrainerAction::Iterate(Creature* creature, bool learnSpells, uint32 spellId
 
         Trainer::Spell const* trainerSpell = trainer->GetSpell(spell.SpellId);
         if (!trainerSpell)
+            continue;
+
+        if (!PlayerbotFactory::IsTrainerSpellAllowedForBot(bot, trainer, trainerSpell))
             continue;
 
         if (!trainer->CanTeachSpell(bot, trainerSpell))
@@ -175,7 +188,7 @@ void TrainerAction::TellFooter(uint32 totalCost)
 
 bool MaintenanceAction::Execute(Event /*event*/)
 {
-    if (!sPlayerbotAIConfig.maintenanceCommand)
+    if (!sPlayerbotAIConfig.MaintenanceCommand)
     {
         botAI->TellError("maintenance command is not allowed, please check the configuration.");
         return false;
@@ -204,67 +217,67 @@ bool MaintenanceAction::Execute(Event /*event*/)
         factory.InitMounts();
         factory.InitGlyphs(false);
         factory.InitKeyring();
-        if (bot->GetLevel() >= sPlayerbotAIConfig.minEnchantingBotLevel)
+        if (bot->GetLevel() >= sPlayerbotAIConfig.MinEnchantingBotLevel)
             factory.ApplyEnchantAndGemsNew();
     }
     else
     {
-        if (sPlayerbotAIConfig.altMaintenanceAttunementQs)
+        if (sPlayerbotAIConfig.AltMaintenanceAttunementQs)
             factory.InitAttunementQuests();
 
-        if (sPlayerbotAIConfig.altMaintenanceBags)
+        if (sPlayerbotAIConfig.AltMaintenanceBags)
             factory.InitBags(false);
 
-        if (sPlayerbotAIConfig.altMaintenanceAmmo)
+        if (sPlayerbotAIConfig.AltMaintenanceAmmo)
             factory.InitAmmo();
 
-        if (sPlayerbotAIConfig.altMaintenanceFood)
+        if (sPlayerbotAIConfig.AltMaintenanceFood)
             factory.InitFood();
 
-        if (sPlayerbotAIConfig.altMaintenanceReagents)
+        if (sPlayerbotAIConfig.AltMaintenanceReagents)
             factory.InitReagents();
 
-        if (sPlayerbotAIConfig.altMaintenanceConsumables)
+        if (sPlayerbotAIConfig.AltMaintenanceConsumables)
             factory.InitConsumables();
 
-        if (sPlayerbotAIConfig.altMaintenancePotions)
+        if (sPlayerbotAIConfig.AltMaintenancePotions)
             factory.InitPotions();
 
-        if (sPlayerbotAIConfig.altMaintenanceTalentTree)
+        if (sPlayerbotAIConfig.AltMaintenanceTalentTree)
             factory.InitTalentsTree(true);
 
-        if (sPlayerbotAIConfig.altMaintenancePet)
+        if (sPlayerbotAIConfig.AltMaintenancePet)
             factory.InitPet();
 
-        if (sPlayerbotAIConfig.altMaintenancePetTalents)
+        if (sPlayerbotAIConfig.AltMaintenancePetTalents)
             factory.InitPetTalents();
 
-        if (sPlayerbotAIConfig.altMaintenanceSkills)
+        if (sPlayerbotAIConfig.AltMaintenanceSkills)
             factory.InitSkills();
 
-        if (sPlayerbotAIConfig.altMaintenanceClassSpells)
+        if (sPlayerbotAIConfig.AltMaintenanceClassSpells)
             factory.InitClassSpells();
 
-        if (sPlayerbotAIConfig.altMaintenanceAvailableSpells)
+        if (sPlayerbotAIConfig.AltMaintenanceAvailableSpells)
             factory.InitAvailableSpells();
 
-        if (sPlayerbotAIConfig.altMaintenanceReputation)
+        if (sPlayerbotAIConfig.AltMaintenanceReputation)
             factory.InitReputation();
 
-        if (sPlayerbotAIConfig.altMaintenanceSpecialSpells)
+        if (sPlayerbotAIConfig.AltMaintenanceSpecialSpells)
             factory.InitSpecialSpells();
 
-        if (sPlayerbotAIConfig.altMaintenanceMounts)
+        if (sPlayerbotAIConfig.AltMaintenanceMounts)
             factory.InitMounts();
 
-        if (sPlayerbotAIConfig.altMaintenanceGlyphs)
+        if (sPlayerbotAIConfig.AltMaintenanceGlyphs)
             factory.InitGlyphs(false);
 
-        if (sPlayerbotAIConfig.altMaintenanceKeyring)
+        if (sPlayerbotAIConfig.AltMaintenanceKeyring)
             factory.InitKeyring();
 
-        if (sPlayerbotAIConfig.altMaintenanceGemsEnchants &&
-            bot->GetLevel() >= sPlayerbotAIConfig.minEnchantingBotLevel)
+        if (sPlayerbotAIConfig.AltMaintenanceGemsEnchants &&
+            bot->GetLevel() >= sPlayerbotAIConfig.MinEnchantingBotLevel)
             factory.ApplyEnchantAndGemsNew();
     }
 
@@ -276,44 +289,41 @@ bool MaintenanceAction::Execute(Event /*event*/)
 
 bool BisGearAction::RunAutogearFallback(uint16 effectiveIlvl)
 {
-    if (!sPlayerbotAIConfig.autoGearCommand)
+    if (!sPlayerbotAIConfig.AutoGearCommand)
     {
         botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-            "bis_autogear_unavailable_error",
-            "autogear command is not allowed, please check the configuration.", {}));
+            "bis_autogear_unavailable_error", "autogear command is not allowed, please check the configuration.", {}));
         return false;
     }
 
     botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-        "bis_no_rows_fallback",
-        "No BiS for your tier/spec/level, check cfg, running autogear instead", {}));
+        "bis_no_rows_fallback", "No BiS for your tier/spec/level, check cfg, running autogear instead", {}));
 
     // A BiS request should not downgrade an existing loadout when the table has no
     // matching row. Use the normal incremental gear path with an item-level floor.
-    PlayerbotFactory::AutoGear(bot, sPlayerbotAIConfig.autoGearQualityLimit, effectiveIlvl, /*incremental*/ true,
+    PlayerbotFactory::AutoGear(bot, sPlayerbotAIConfig.AutoGearQualityLimit, effectiveIlvl, /*incremental*/ true,
                                /*secondChance*/ false, /*applyFinishers*/ true, /*preserveHigherIlvl*/ true);
     return true;
 }
 
 bool BisGearAction::Execute(Event event)
 {
-    if (!sPlayerbotAIConfig.autoGearBisCommand)
+    if (!sPlayerbotAIConfig.AutoGearBisCommand)
     {
         botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-            "bis_command_unavailable_error",
-            "bis command is not allowed, please check the configuration.", {}));
+            "bis_command_unavailable_error", "bis command is not allowed, please check the configuration.", {}));
         return false;
     }
 
-    if (!sPlayerbotAIConfig.autoGearCommandAltBots &&
+    if (!sPlayerbotAIConfig.AutoGearCommandAltBots &&
         !sPlayerbotAIConfig.IsInRandomAccountList(bot->GetSession()->GetAccountId()))
     {
-        botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-            "bis_altbot_refused_error", "You cannot use bis on alt bots.", {}));
+        botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault("bis_altbot_refused_error",
+                                                                          "You cannot use bis on alt bots.", {}));
         return false;
     }
 
-    if (sPlayerbotAIConfig.autoGearQualityLimit < 4)
+    if (sPlayerbotAIConfig.AutoGearQualityLimit < 4)
     {
         botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
             "bis_quality_floor_error", "AutoGearQualityLimit must be 4 for BiS.", {}));
@@ -327,7 +337,7 @@ bool BisGearAction::Execute(Event event)
         return false;
     }
 
-    uint16 ilvl = static_cast<uint16>(sPlayerbotAIConfig.autoGearScoreLimit);
+    uint16 ilvl = static_cast<uint16>(sPlayerbotAIConfig.AutoGearScoreLimit);
 
     // Optional explicit ilvl override: `/p autogear bis 55`.
     // Garbage or out-of-range args are hard-rejected: no autogear fallback, no gear change.
@@ -352,21 +362,19 @@ bool BisGearAction::Execute(Event event)
             std::map<std::string, std::string> phs;
             phs["%param"] = param;
             botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-                "bis_invalid_arg_error",
-                "Invalid BiS ilvl argument '%param'. Use a positive integer.", phs));
+                "bis_invalid_arg_error", "Invalid BiS ilvl argument '%param'. Use a positive integer.", phs));
             return false;
         }
         // A zero limit means "unlimited" for an explicit `autogear bis <ilvl>`
         // request. Keep non-zero limits as the administrative safety ceiling.
-        if (sPlayerbotAIConfig.autoGearScoreLimit > 0 &&
-            parsed > static_cast<unsigned long>(sPlayerbotAIConfig.autoGearScoreLimit))
+        if (sPlayerbotAIConfig.AutoGearScoreLimit > 0 &&
+            parsed > static_cast<unsigned long>(sPlayerbotAIConfig.AutoGearScoreLimit))
         {
             std::map<std::string, std::string> phs;
             phs["%requested"] = std::to_string(parsed);
-            phs["%limit"] = std::to_string(sPlayerbotAIConfig.autoGearScoreLimit);
+            phs["%limit"] = std::to_string(sPlayerbotAIConfig.AutoGearScoreLimit);
             botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-                "bis_arg_above_limit_error",
-                "BiS ilvl %requested exceeds AutoGearScoreLimit %limit, refusing", phs));
+                "bis_arg_above_limit_error", "BiS ilvl %requested exceeds AutoGearScoreLimit %limit, refusing", phs));
             return false;
         }
         ilvl = static_cast<uint16>(parsed);
@@ -392,8 +400,7 @@ bool BisGearAction::Execute(Event event)
         std::map<std::string, std::string> phs;
         phs["%ilvl"] = std::to_string(ilvl);
         botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-            "bis_no_rows_autogear_msg",
-            "No BiS at ilvl %ilvl, using Autogear %ilvl instead", phs));
+            "bis_no_rows_autogear_msg", "No BiS at ilvl %ilvl, using Autogear %ilvl instead", phs));
         return RunAutogearFallback(ilvl);
     }
 
@@ -403,12 +410,10 @@ bool BisGearAction::Execute(Event event)
         phs["%requested"] = std::to_string(ilvl);
         phs["%resolved"] = std::to_string(resolvedIlvl);
         botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-            "bis_closest_match_msg",
-            "No BiS at ilvl %requested, using closest match at ilvl %resolved", phs));
+            "bis_closest_match_msg", "No BiS at ilvl %requested, using closest match at ilvl %resolved", phs));
     }
 
-    botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault(
-        "bis_applying_msg", "Applying BiS gear", {}));
+    botAI->TellMaster(PlayerbotTextMgr::instance().GetBotTextOrDefault("bis_applying_msg", "Applying BiS gear", {}));
 
     // Apply BiS as an upgrade-only operation. Existing gear at the same or higher
     // item level stays equipped, and displaced lower-level gear is moved to bags.
@@ -434,7 +439,10 @@ bool BisGearAction::Execute(Event event)
 
         uint16 dest = 0;
         if (bot->CanEquipItem(slot, dest, item, false) == EQUIP_ERR_OK)
+        {
+            bot->RemoveItem(item->GetBagSlot(), item->GetSlot(), true);
             bot->EquipItem(dest, item, true);
+        }
     };
 
     uint32 preservedItems = 0;
@@ -456,8 +464,8 @@ bool BisGearAction::Execute(Event event)
                 ReputationRank requiredRank = static_cast<ReputationRank>(proto->RequiredReputationRank);
                 if (bot->GetReputationRank(proto->RequiredReputationFaction) < requiredRank)
                 {
-                    int32 standing = ReputationMgr::ReputationRankToStanding(
-                                         static_cast<ReputationRank>(requiredRank - 1)) + 1;
+                    int32 standing =
+                        ReputationMgr::ReputationRankToStanding(static_cast<ReputationRank>(requiredRank - 1)) + 1;
                     bot->GetReputationMgr().SetReputation(fac, standing);
                 }
             }
@@ -482,10 +490,9 @@ bool BisGearAction::Execute(Event event)
         // not do that when the off-hand is at least as high-level as the upgrade.
         if (slot == EQUIPMENT_SLOT_MAINHAND)
         {
-            bool removesOffhand = proto->InventoryType == INVTYPE_2HWEAPON ||
-                                   proto->SubClass == ITEM_SUBCLASS_WEAPON_POLEARM ||
-                                   proto->SubClass == ITEM_SUBCLASS_WEAPON_STAFF ||
-                                   proto->SubClass == ITEM_SUBCLASS_WEAPON_FISHING_POLE;
+            bool removesOffhand =
+                proto->InventoryType == INVTYPE_2HWEAPON || proto->SubClass == ITEM_SUBCLASS_WEAPON_POLEARM ||
+                proto->SubClass == ITEM_SUBCLASS_WEAPON_STAFF || proto->SubClass == ITEM_SUBCLASS_WEAPON_FISHING_POLE;
             if (removesOffhand)
             {
                 if (Item* offhand = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND))
@@ -528,7 +535,7 @@ bool BisGearAction::Execute(Event event)
 
     PlayerbotFactory factory(bot, bot->GetLevel(), ITEM_QUALITY_EPIC, 0);
     factory.InitAmmo();
-    if (bot->GetLevel() >= sPlayerbotAIConfig.minEnchantingBotLevel)
+    if (bot->GetLevel() >= sPlayerbotAIConfig.MinEnchantingBotLevel)
         factory.ApplyEnchantAndGemsNew();
 
     bot->DurabilityRepairAll(false, 1.0f, false);
@@ -570,14 +577,14 @@ static uint32 GetWornItemLevelAverage(Player* player)
 
 bool AutoGearAction::Execute(Event event)
 {
-    if (!sPlayerbotAIConfig.autoGearCommand)
+    if (!sPlayerbotAIConfig.AutoGearCommand)
     {
         botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault(
             "autogear_command_disabled_error", "autogear command is not allowed, please check the configuration.", {}));
         return false;
     }
 
-    if (!sPlayerbotAIConfig.autoGearCommandAltBots &&
+    if (!sPlayerbotAIConfig.AutoGearCommandAltBots &&
         !sPlayerbotAIConfig.IsInRandomAccountList(bot->GetSession()->GetAccountId()))
     {
         botAI->TellError(PlayerbotTextMgr::instance().GetBotTextOrDefault("autogear_altbot_refused_error",
@@ -585,8 +592,8 @@ bool AutoGearAction::Execute(Event event)
         return false;
     }
 
-    uint32 const qualityCap = static_cast<uint32>(sPlayerbotAIConfig.autoGearQualityLimit);
-    uint32 const ilvlCap = static_cast<uint32>(sPlayerbotAIConfig.autoGearScoreLimit);  // 0 == no limit
+    uint32 const qualityCap = static_cast<uint32>(sPlayerbotAIConfig.AutoGearQualityLimit);
+    uint32 const ilvlCap = static_cast<uint32>(sPlayerbotAIConfig.AutoGearScoreLimit);  // 0 == no limit
 
     uint32 quality = qualityCap;
     uint32 ilvl = ilvlCap;
@@ -725,7 +732,7 @@ bool AutoGearAction::Execute(Event event)
         // Wipe everything equipped first so old high-tier items can't survive; then gear every
         // slot from scratch instead of only upgrading past the incremental threshold.
         PlayerbotFactory::DestroyEquippedGear(bot);
-        PlayerbotFactory::AutoGear(bot, quality, ilvl, /*incremental*/ false, sPlayerbotAIConfig.twoRoundsGearInit);
+        PlayerbotFactory::AutoGear(bot, quality, ilvl, /*incremental*/ false, sPlayerbotAIConfig.TwoRoundsGearInit);
     }
     else
         PlayerbotFactory::AutoGear(bot, quality, ilvl, /*incremental*/ true);
