@@ -731,7 +731,7 @@ void PlayerbotFactory::Init()
 void PlayerbotFactory::BuildCcBreakTrinketCache()
 {
     ccBreakTrinketCache.clear();
-    // Spell 42292: removes all movement-impairing and loss-of-control effects � the PvP trinket spell.
+    // Spell 42292: removes all movement-impairing and loss-of-control effects — the PvP trinket spell.
     QueryResult result = WorldDatabase.Query(
         "SELECT entry, ItemLevel FROM item_template "
         "WHERE Quality >= 2 AND InventoryType = 12 "
