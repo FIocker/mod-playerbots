@@ -671,22 +671,22 @@ bool PlayerbotAI::IsChatCommand(std::string const text) const
     if (filtered.find("BOT\t") == 0)
         filtered = filtered.substr(4);
 
-    if (!sPlayerbotAIConfig.commandSeparator.empty() &&
-        filtered.find(sPlayerbotAIConfig.commandSeparator) != std::string::npos)
+    if (!sPlayerbotAIConfig.CommandSeparator.empty() &&
+        filtered.find(sPlayerbotAIConfig.CommandSeparator) != std::string::npos)
     {
         std::vector<std::string> commands;
-        split(commands, filtered, sPlayerbotAIConfig.commandSeparator.c_str());
+        split(commands, filtered, sPlayerbotAIConfig.CommandSeparator.c_str());
         for (std::string const& command : commands)
             if (IsChatCommand(command))
                 return true;
         return false;
     }
 
-    if (!sPlayerbotAIConfig.commandPrefix.empty())
+    if (!sPlayerbotAIConfig.CommandPrefix.empty())
     {
-        if (filtered.find(sPlayerbotAIConfig.commandPrefix) != 0)
+        if (filtered.find(sPlayerbotAIConfig.CommandPrefix) != 0)
             return false;
-        filtered = filtered.substr(sPlayerbotAIConfig.commandPrefix.size());
+        filtered = filtered.substr(sPlayerbotAIConfig.CommandPrefix.size());
     }
 
     filtered = trim((std::string&)filtered);
